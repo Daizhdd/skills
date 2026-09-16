@@ -38,23 +38,27 @@ WorkBuddy 目前只做渲染层主题，不需要 Codex 那套宿主外观设置
 | --- | --- |
 | `.conversation-shell` | 实色白 |
 | `[class*="gridView"]`、`[class*="_grid_"]` | 实色白 —— 网格布局单元，CSS Module 生成的哈希类 |
-| `main.wb-home-route` | 实色白 —— **仅首页路由有** |
+| `.wb-home-route` | 实色白，972×734 —— **仅首页路由有** |
 | `#workbuddy-menubar-container` | `rgb(242, 242, 242)`，顶部 30px 的条 |
 | `.workbuddy-window-controls` | `--cb-panel-bg-primary` —— 最小化 / 最大化 / 关闭按钮下面的那条 |
 | `.cr-input-container`、`.cr-input-toolbar__right` | 实色白，在输入框内层 |
-| `.collapsible-section-header`、`.conversation-section-label` | `rgb(242, 242, 242)` —— 侧栏分组标题 |
+| `.collapsible-section-header`、`.conversation-section-label` | `rgb(242, 242, 242)` —— 侧栏分组标题（**注意：这一条清不掉**，见下） |
 | `[class*="cb-agent-card"]` | 白 / `rgb(230, 230, 230)` —— 侧栏会话卡片 |
 
 梳理这张表时踩到两个坑：
 
-- **`.wb-home-route` 只有首页有。** 会话页没有这层，所以一个主题可能「会话页正常、首页发白」。两条路由都要验证。
+- **`.wb-home-route` 只有首页有，而且它不是首页内容的祖先。** 它确实是 `<main class="wb-home-route">`，但在 5.5.6 上它是作为**兄弟层垫在下面的** —— 在首页界面之下、在你的背景之上。从 `document.elementFromPoint` 往上回溯永远到不了它，于是回溯链看起来干干净净、窗口却照样发白。只有全量枚举才能把它揪出来。这正是「会话页正常、首页发白」的准确机理。
 - **不要用 `[class*="grid_"]`。** 它会误伤 `artifact-slot-panel__grid` 这类无关类名。
+
+选择器**不要带标签名** —— 写 `.wb-home-route`，不要写 `main.wb-home-route`。它碰巧是个 `<main>`，但要不要清掉这层，跟标签名能不能跨版本稳住是两回事。
+
+`.collapsible-section-header` 是这张表里**唯一清不掉**的一条。应用方是用这条规则画它的：`.conversation-section-content [class^="collapsible-section"] > [class*="header"] { background: var(--wb-sidebar-bg, var(--cb-sidebar-bg, var(--vscode-sideBar-background, #fff))) !important }`。把自己的选择器提权越过去 —— 实测提到 `(0,4,1)` 加 `!important` —— 依然压不动；重新定义 `--cb-sidebar-bg` / `--wb-sidebar-bg` 同样无效。可见**优先级并不是唯一的决定因素**。保持原生，并在主题里写明这一点，而不是留一条静默失效的规则。
 
 这张表是绑定版本的。应用升级后要重新推导，不要直接照信。
 
 ## 路由与外观
 
-- 会话容器是 `.conversation-shell`，首页路由是 `main.wb-home-route`。`.chat-container` 已不存在。
+- 会话容器是 `.conversation-shell`，首页路由是 `.wb-home-route`（是个 `<main>`，但选择器里不要带标签名）。`.chat-container` 已不存在。
 - 外观由 **`<html>` 上的 `data-theme` 属性**驱动（`light` / `dark`），配套一整套语义 token（`--cb-text-primary`、`--cb-panel-bg-primary`、`--cb-bg-secondary`、`--sk-*`，合计数千个自定义属性）。只换 `light` / `cb-light` 这些 class 是没有任何效果的。
 - 因此主题可以用 `html[data-theme="dark"] { … }` 跟随宿主外观 —— 它的特异性高于普通宿主选择器，所以**一个主题包就能自适应，而不是把某一种外观写死**。
 
@@ -71,6 +75,9 @@ WorkBuddy 目前只做渲染层主题，不需要 Codex 那套宿主外观设置
 
 - 平均亮度描述不了壁纸有多**繁密**。一张很亮但细节细碎的插画，仍然需要一层薄白纱（约 0.40），因为文字背后的细密花纹读起来就是噪点。
 - 既然关键在「配对」，那么算出来的这组值正好可以用来告诉用户：**他这张图想要哪种外观** —— 以及当他正在用的外观不匹配时给出提醒。
+- **不要让纱重到把图片自身的明暗关系反转掉。** 在双峰分布的壁纸上，这个坑会在深色外观下咬人。一条从左往右递增的纱，如果左端重到把图片的亮部按死（`.93`），那一侧会从 253 掉到 28；而图片的暗部在轻得多的 `.62` 之下落在 46。**亮部反而比暗部更暗**，而侧栏正好压在那片亮部上，于是塌成一条没有纹理的近乎纯黑带。用户会把这种现象读成渲染 bug，而不是壁纸。左端的取值要让亮部落在与窗口其余部分大致同档的亮度上：取 `.83` 时左端是 52，主内容区是 52–60，那条带就消失了。**这件事要测，不要靠眼睛估** —— 在截图上横着采一行像素，横跨侧栏与内容区，看两者之间的台阶。
+
+  深色主题配浅色文字的粗略目标：整窗压在 110 亮度以下，且最亮与最暗区域相互差距控制在 10–15 以内，否则壁纸自身的结构就会被读成界面缺陷。
 
 ## 诊断「apply 成功但界面没变化」
 
@@ -78,6 +85,9 @@ apply 通过只能证明样式到达了渲染进程。如果窗口看起来毫�
 
 1. 从 `document.elementFromPoint(x, y)` 逐级向上回溯，打印每一层的 `backgroundColor` —— 这样就能看出是哪一层盖住了图。
 2. 枚举所有 `backgroundColor` 的 alpha 大于 0.85、且与视口相交的元素，按可见面积排序。**不要用面积阈值去过滤** —— 尺寸过滤会漏掉窗口按钮条这类小组件。
+3. **不要只信第 1 步。** 回溯法有个盲区：一块垫在内容之下、背景之上的实色**兄弟层**，它回溯不出来 —— 栈是干净的，窗口却照样发白。只要第 1 步查下来没问题但结果依然不对，就去跑第 2 步；`.wb-home-route` 就是这么被揪出来的。
+
+修完之后用同样的方式确认：把清底清单上每个元素的实际 `backgroundColor` 读出来，确认它**真的**变成了 `rgba(0, 0, 0, 0)`。一条规则在源码里看着没问题，却可能输掉一场层叠博弈；只有计算值能证明它生效了。
 
 ## 不要用脚本切换外观来验证颜色
 
@@ -91,3 +101,43 @@ apply 通过只能证明样式到达了渲染进程。如果窗口看起来毫�
 - **会话内的内容卡片**（`.cr-tool-exp__content`、`.cr-code-like-box` 等）、按钮与头像 —— 这些是内容与控件，不是窗口 chrome。
 
 只清 chrome：侧栏、顶栏、菜单栏、窗口按钮条、输入框外壳。
+
+## 「只换壁纸」的主题里没有几何属性
+
+不是每个需求都想重做界面。「把壁纸换掉，别动我的界面」是个很正常的诉求，而它对应的是**另一种主题形态**：铺根节点、清底板、到此为止。
+
+把尺寸和间距属性彻底挡在文件之外。一个主题如果在应用 chrome 上还写了 `width`、`max-width`、`gap`、`min-height`、`padding`、`border-radius`、`box-shadow`、`transform` 或 `border`，就会明显重构用户根本没要求你碰的表面。在 5.5.6 上，最先出问题的就是首页 —— 因为那块 hero 是一个**居中标题**，而底板就在它背后画底：
+
+- `.wb-home-page` —— `width` / `max-width` / `gap` 会把整列重新定尺。
+- `.wb-home-header` —— `min-height` / `padding` / `overflow` 会把 hero 撑大并裁掉它的内容。
+- `.wb-home-header__title` —— 给一个 `width` 约束就会让居中标题重新折行。
+- `.teams-content-wrapper`、`.wb-scene-tabs`、`.quick-actions__item` —— 圆角、边框和阴影会把本来好好的芯片挪位、改样。
+
+症状很有辨识度：hero 标题**被上边缘裁掉**，场景标签**脱离卡片**飘在壁纸上。看到这个，就不是清底的问题 —— 是主题里有一条几何声明。删掉它，布局自己就回来了。
+
+于是整个文件缩成两件事，而且值得就保持这么小：
+
+```css
+/* 1. 在窗口根节点铺壁纸，每种外观一层纱 */
+html.codedrobe-host-workbuddy,
+html.codedrobe-host-workbuddy body,
+html.codedrobe-host-workbuddy #root {
+  background-color: #fbfbfa !important;
+  background-image: var(--ink-veil), var(--codedrobe-image-wallpaper, none) !important;
+  background-repeat: no-repeat, no-repeat !important;
+  background-position: center center, center 20% !important;
+  background-size: 100% 100%, cover !important;
+  background-attachment: fixed, fixed !important;
+}
+
+/* 2. 只清上面那张表里的底板，别的一律不动 */
+html.codedrobe-host-workbuddy .teams-container,
+html.codedrobe-host-workbuddy [class*="_gridViewItem_"],
+html.codedrobe-host-workbuddy .conversation-shell,
+html.codedrobe-host-workbuddy .wb-home-route {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+```
+
+裁切补充：1236×764 的窗口比 1186×856 的参考图更宽，所以 `cover` 两个方向都由宽度定尺，横向没有自由度 —— `background-position` 只能纵向移动画面。按焦点去锚定（`center 20%` 保住了脸部），并接受被裁掉的是底部。
