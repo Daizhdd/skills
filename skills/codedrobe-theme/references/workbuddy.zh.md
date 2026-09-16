@@ -42,7 +42,7 @@ WorkBuddy 目前只做渲染层主题，不需要 Codex 那套宿主外观设置
 | `#workbuddy-menubar-container` | `rgb(242, 242, 242)`，顶部 30px 的条 |
 | `.workbuddy-window-controls` | `--cb-panel-bg-primary` —— 最小化 / 最大化 / 关闭按钮下面的那条 |
 | `.cr-input-container`、`.cr-input-toolbar__right` | 实色白，在输入框内层 |
-| `.collapsible-section-header`、`.conversation-section-label` | `rgb(242, 242, 242)` —— 侧栏分组标题（**注意：这一条清不掉**，见下） |
+| `.collapsible-section-header`、`.conversation-section-label` | `rgb(242, 242, 242)` —— 侧栏分组标题（**需要更高优先级的选择器，见下**） |
 | `[class*="cb-agent-card"]` | 白 / `rgb(230, 230, 230)` —— 侧栏会话卡片 |
 
 梳理这张表时踩到两个坑：
@@ -52,7 +52,28 @@ WorkBuddy 目前只做渲染层主题，不需要 Codex 那套宿主外观设置
 
 选择器**不要带标签名** —— 写 `.wb-home-route`，不要写 `main.wb-home-route`。它碰巧是个 `<main>`，但要不要清掉这层，跟标签名能不能跨版本稳住是两回事。
 
-`.collapsible-section-header` 是这张表里**唯一清不掉**的一条。应用方是用这条规则画它的：`.conversation-section-content [class^="collapsible-section"] > [class*="header"] { background: var(--wb-sidebar-bg, var(--cb-sidebar-bg, var(--vscode-sideBar-background, #fff))) !important }`。把自己的选择器提权越过去 —— 实测提到 `(0,4,1)` 加 `!important` —— 依然压不动；重新定义 `--cb-sidebar-bg` / `--wb-sidebar-bg` 同样无效。可见**优先级并不是唯一的决定因素**。保持原生，并在主题里写明这一点，而不是留一条静默失效的规则。
+`.collapsible-section-header` 是这张表里唯一需要**更高优先级选择器**的一条。应用方是这样画它的：
+
+```css
+.conversation-section-content [class^="collapsible-section"] > [class*="header"] {
+  background: var(--wb-sidebar-bg, var(--cb-sidebar-bg, var(--vscode-sideBar-background, #fff))) !important;
+}
+```
+
+特异性 `(0,3,0)` 且带 `!important`，所以最直观的 `html.codedrobe-host-workbuddy .collapsible-section-header`（`(0,2,1)`）会输，那 5 条标题就保留原生底色。加上外观属性与一个容器类就能越过去：
+
+```css
+html.codedrobe-host-workbuddy[data-theme] .conversation-list .collapsible-section-header {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+```
+
+`(0,4,1)` 即可清掉全部 5 条。深色外观下这个差别一点不含糊：原生 `rgb(31, 31, 31)` 的标题条压在蒙过纱的侧栏（约 72）上，就是 5 条平黑带，看起来像渲染故障，不像壁纸。
+
+**真正值得记住的坑在「怎么测」，而不是「怎么写」。** 在**同一次 JS 求值里**「注入样式 + 读 `getComputedStyle`」会读到旧值。这个失效模式和「这条根本覆盖不了」长得一模一样 —— 这里那条 `(0,4,1)` 覆盖就是这么被误判为无效的。要分两次调用：先注入，隔一两帧，再读。
+
+另外，在 `html.codedrobe-host-workbuddy` 上重定义 `--cb-sidebar-bg` / `--wb-sidebar-bg` **不起作用**：应用是在更高的优先级上定义这两个变量的，你设的那个不是它读的那个。直接覆盖起冲突的**属性**，比追着它的输入变量跑要简单。
 
 这张表是绑定版本的。应用升级后要重新推导，不要直接照信。
 

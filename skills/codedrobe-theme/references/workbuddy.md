@@ -40,7 +40,7 @@ An apply can report complete success while the window looks untouched: the rende
 | `#workbuddy-menubar-container`                               | `rgb(242, 242, 242)`, the top 30 px strip                                          |
 | `.workbuddy-window-controls`                                 | `--cb-panel-bg-primary` — the strip behind the minimise / maximise / close buttons |
 | `.cr-input-container`, `.cr-input-toolbar__right`            | solid white, inside the composer                                                   |
-| `.collapsible-section-header`, `.conversation-section-label` | `rgb(242, 242, 242)` — sidebar group headers (**see the note below: not clearable**) |
+| `.collapsible-section-header`, `.conversation-section-label` | `rgb(242, 242, 242)` — sidebar group headers (**needs a higher-specificity selector, see below**) |
 | `[class*="cb-agent-card"]`                                   | white / `rgb(230, 230, 230)` — sidebar conversation cards                          |
 
 Two traps found while deriving this list:
@@ -50,7 +50,28 @@ Two traps found while deriving this list:
 
 Write the selector without a tag name — `.wb-home-route`, not `main.wb-home-route`. The element happens to be a `<main>`, but the plate is worth clearing whether or not that stays true across releases.
 
-`.collapsible-section-header` is the one plate on this list that **cannot be cleared from a theme**. The app paints it from `.conversation-section-content [class^="collapsible-section"] > [class*="header"] { background: var(--wb-sidebar-bg, var(--cb-sidebar-bg, var(--vscode-sideBar-background, #fff))) !important }`. Raising your own selector past that — a `(0,4,1)` `!important` was tried — still loses, and redefining `--cb-sidebar-bg` / `--wb-sidebar-bg` does not help either, so specificity alone is not the deciding factor. Leave it native and say so in the theme, rather than shipping a rule that silently does nothing.
+`.collapsible-section-header` is the one plate on this list that needs a **higher-specificity selector**. The app paints it from
+
+```css
+.conversation-section-content [class^="collapsible-section"] > [class*="header"] {
+  background: var(--wb-sidebar-bg, var(--cb-sidebar-bg, var(--vscode-sideBar-background, #fff))) !important;
+}
+```
+
+That is `(0,3,0)` and important, so the obvious `html.codedrobe-host-workbuddy .collapsible-section-header` (`(0,2,1)`) loses and the five headers keep their native surface. Reach past it by adding the appearance attribute and a container class:
+
+```css
+html.codedrobe-host-workbuddy[data-theme] .conversation-list .collapsible-section-header {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+```
+
+`(0,4,1)` clears all five. In the dark appearance the difference is not subtle: the native `rgb(31, 31, 31)` header against a veiled sidebar around 72 reads as five flat black bars, which looks like a rendering fault rather than a wallpaper.
+
+**The trap worth remembering is how this is measured, not how it is written.** Injecting a style and reading `getComputedStyle` in the *same* JS evaluation returns the stale value. That failure mode is indistinguishable from "this plate cannot be overridden", and it is how a `(0,4,1)` override got written off as ineffective here. Inject in one call, let a frame or two pass, then read in a second call.
+
+Also note that redefining `--cb-sidebar-bg` / `--wb-sidebar-bg` on `html.codedrobe-host-workbuddy` does *not* work: the app defines those variables at a higher specificity, so the variable you set is not the one it reads. Overriding the conflicting *property* directly is simpler than chasing its inputs.
 
 The list is version-bound. When the app updates, re-derive it rather than trusting the table.
 
