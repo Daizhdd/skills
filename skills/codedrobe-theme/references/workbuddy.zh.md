@@ -32,23 +32,28 @@ WorkBuddy 目前只做渲染层主题，不需要 Codex 那套宿主外观设置
 
 ## 会盖住壁纸的不透明底板
 
-一次 apply 可以完整报告成功，而窗口看起来毫无变化：渲染进程在注入的背景之上又画了自己的实色表面。在 **5.5.6** 上，只有清掉下面这些，壁纸才能真正显示出来。
+一次 apply 可以完整报告成功，而窗口看起来毫无变化：渲染进程在注入的背景之上又画了自己的实色表面。在 **5.5.6 与 5.6.0** 上，只有清掉下面这些，壁纸才能真正显示出来。
 
 | 元素 | 它原来的颜色 |
 | --- | --- |
 | `.conversation-shell` | 实色白 |
 | `[class*="gridView"]`、`[class*="_grid_"]` | 实色白 —— 网格布局单元，CSS Module 生成的哈希类 |
+| `.teams-grid-scroll-content` | 实色白，1256×746 —— **5.6.0 新增的一层**，5.5.6 上没有 |
 | `.wb-home-route` | 实色白，972×734 —— **仅首页路由有** |
 | `#workbuddy-menubar-container` | `rgb(242, 242, 242)`，顶部 30px 的条 |
 | `.workbuddy-window-controls` | `--cb-panel-bg-primary` —— 最小化 / 最大化 / 关闭按钮下面的那条 |
-| `.cr-input-container`、`.cr-input-toolbar__right` | 实色白，在输入框内层 |
+| `.cr-input-container`、`.cr-input-toolbar__right` | 实色白，在输入框内层（会话页） |
+| `.cr-input-box__main` | `linear-gradient(rgb(235,235,235), rgb(245,245,245))` —— **首页**输入框的底板，注意它画在 `background-image` 上，`background-color` 读出来是透明的 |
 | `.collapsible-section-header`、`.conversation-section-label` | `rgb(242, 242, 242)` —— 侧栏分组标题（**需要更高优先级的选择器，见下**） |
 | `[class*="cb-agent-card"]` | 白 / `rgb(230, 230, 230)` —— 侧栏会话卡片 |
 
-梳理这张表时踩到两个坑：
+梳理这张表时踩到三个坑：
 
 - **`.wb-home-route` 只有首页有，而且它不是首页内容的祖先。** 它确实是 `<main class="wb-home-route">`，但在 5.5.6 上它是作为**兄弟层垫在下面的** —— 在首页界面之下、在你的背景之上。从 `document.elementFromPoint` 往上回溯永远到不了它，于是回溯链看起来干干净净、窗口却照样发白。只有全量枚举才能把它揪出来。这正是「会话页正常、首页发白」的准确机理。
 - **不要用 `[class*="grid_"]`。** 它会误伤 `artifact-slot-panel__grid` 这类无关类名。
+- **CSS Module 的哈希类名随构建变化，永远不要按全名匹配，也不要为了「更精确」而收窄成前缀更长的写法。** 5.5.6 上那块内容区白板是 `_gridViewItem_<hash>`，到 5.6.0 变成了 `_gridView_7xbcw_9`。如果当初写的是 `[class*="_gridViewItem_"]`，升级后一条都不命中，两块 1256×746 的纯白重新盖住整窗 —— 症状和「主题没生效」一模一样。按 `[class*="gridView"]` 这种稳定前缀匹配才跨版本。
+  - 子串匹配没有"单词边界"：`_gridView_`（尾部带下划线）**匹配不到** `_gridViewItem_`，反之亦然。要同时兼容两个版本就两条都写。
+  - 顺带一提，这条坑最早是**人为制造**的：把这份笔记里的 `[class*="gridView"]` 改写成 `[class*="_gridViewItem_"]` 看起来更严谨，实际是把选择器的覆盖面缩到了某一个版本。
 
 选择器**不要带标签名** —— 写 `.wb-home-route`，不要写 `main.wb-home-route`。它碰巧是个 `<main>`，但要不要清掉这层，跟标签名能不能跨版本稳住是两回事。
 
@@ -102,7 +107,12 @@ html.codedrobe-host-workbuddy[data-theme] .conversation-list .collapsible-sectio
 
 ## 诊断「apply 成功但界面没变化」
 
-apply 通过只能证明样式到达了渲染进程。如果窗口看起来毫无变化，那一定是有祖先元素在画不透明背景。不要猜：
+apply 通过只能证明样式到达了渲染进程。如果窗口看起来毫无变化，先花 30 秒排除两种更根本的可能，再去抓遮挡：
+
+- **这一次启动到底注入了没有？** 主题是运行时注入的。应用升级、或它自己重启之后，新进程往往是**裸启动**的（命令行里没有 `--remote-debugging-port`），注入根本无从发生 —— 界面会完全回到原生皮肤，看起来就像「主题失效了」。这时看进程命令行比看主题快：`Get-CimInstance Win32_Process -Filter "Name='WorkBuddy.exe'"`（macOS 用 `ps -ax -o command`）。没有调试端口就别去改 CSS，先带端口重启一次。
+- **图和 CSS 是不是好的？** 读壁纸自定义属性 → 对它的 `blob:` URL 发一次 `fetch` 确认字节数 → 用 `new Image()` 解码确认尺寸。三项全过就说明素材和样式都没问题，剩下的只能是遮挡，直接往下走。这三步能省掉在 CSP 和 object URL 生命周期上瞎猜的弯路 —— 那几条我都怀疑过，全是错的。
+
+如果上面都正常，那就是有祖先元素在画不透明背景。不要猜：
 
 1. 从 `document.elementFromPoint(x, y)` 逐级向上回溯，打印每一层的 `backgroundColor` —— 这样就能看出是哪一层盖住了图。
 2. 枚举所有 `backgroundColor` 的 alpha 大于 0.85、且与视口相交的元素，按可见面积排序。**不要用面积阈值去过滤** —— 尺寸过滤会漏掉窗口按钮条这类小组件。
@@ -153,7 +163,7 @@ html.codedrobe-host-workbuddy #root {
 
 /* 2. 只清上面那张表里的底板，别的一律不动 */
 html.codedrobe-host-workbuddy .teams-container,
-html.codedrobe-host-workbuddy [class*="_gridViewItem_"],
+html.codedrobe-host-workbuddy [class*="gridView"],
 html.codedrobe-host-workbuddy .conversation-shell,
 html.codedrobe-host-workbuddy .wb-home-route {
   background-color: transparent !important;

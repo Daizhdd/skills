@@ -30,23 +30,28 @@ Capture separate home and conversation snapshots before adapting `assets/theme-s
 
 ## Opaque backplates that hide the wallpaper
 
-An apply can report complete success while the window looks untouched: the renderer paints its own solid surfaces on top of the injected background. On **5.5.6** the wallpaper reaches the screen only after these are cleared.
+An apply can report complete success while the window looks untouched: the renderer paints its own solid surfaces on top of the injected background. On **5.5.6 and 5.6.0** the wallpaper reaches the screen only after these are cleared.
 
 | Element                                                      | What it painted                                                                    |
 | ------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
 | `.conversation-shell`                                        | solid white                                                                        |
 | `[class*="gridView"]`, `[class*="_grid_"]`                   | solid white — CSS-Module hash classes for the grid layout cells                    |
+| `.teams-grid-scroll-content`                                 | solid white, 1256×746 — **an extra layer introduced in 5.6.0**, absent on 5.5.6    |
 | `.wb-home-route`                                             | solid white, 972×734 — **home route only**                                         |
 | `#workbuddy-menubar-container`                               | `rgb(242, 242, 242)`, the top 30 px strip                                          |
 | `.workbuddy-window-controls`                                 | `--cb-panel-bg-primary` — the strip behind the minimise / maximise / close buttons |
-| `.cr-input-container`, `.cr-input-toolbar__right`            | solid white, inside the composer                                                   |
+| `.cr-input-container`, `.cr-input-toolbar__right`            | solid white, inside the composer (conversation route)                              |
+| `.cr-input-box__main`                                        | `linear-gradient(rgb(235,235,235), rgb(245,245,245))` — the **home** composer plate; it paints on `background-image`, so `background-color` reads transparent |
 | `.collapsible-section-header`, `.conversation-section-label` | `rgb(242, 242, 242)` — sidebar group headers (**needs a higher-specificity selector, see below**) |
 | `[class*="cb-agent-card"]`                                   | white / `rgb(230, 230, 230)` — sidebar conversation cards                          |
 
-Two traps found while deriving this list:
+Three traps found while deriving this list:
 
 - **`.wb-home-route` is home-only, and it is not an ancestor of the home content.** It really is `<main class="wb-home-route">`, but on 5.5.6 it is painted as a *sibling underlay* — below the home UI, above your background. Walking up from `document.elementFromPoint` never reaches it, so the ancestor walk returns a clean stack while the window stays washed out. Only full enumeration finds it. This is the exact mechanism behind "looks correct in a conversation, white on home".
 - **Do not use `[class*="grid_"]`.** It also matches unrelated class names such as `artifact-slot-panel__grid`.
+- **CSS-Module hash classes change between builds. Never match them by full name, and never narrow a documented prefix "for precision".** On 5.5.6 the content plate was `_gridViewItem_<hash>`; on 5.6.0 it is `_gridView_7xbcw_9`. Written as `[class*="_gridViewItem_"]` — which is exactly what a narrowed version of this note once recommended — nothing matches after the update and two 1256×746 white plates cover the window again, with symptoms indistinguishable from "the theme never applied". Match the stable prefix, `[class*="gridView"]`.
+  - Substring matching has no word boundaries: `_gridView_` does **not** match `_gridViewItem_`, nor the reverse. Write both if you have to cover both releases.
+  - This one was self-inflicted: rewriting this note's `[class*="gridView"]` as `[class*="_gridViewItem_"]` looked more rigorous and only shrank the selector's coverage down to a single release.
 
 Write the selector without a tag name — `.wb-home-route`, not `main.wb-home-route`. The element happens to be a `<main>`, but the plate is worth clearing whether or not that stays true across releases.
 
@@ -100,7 +105,12 @@ clamp to ≤ 0.82, and emit one value per appearance. Two notes from practice:
 
 ## Diagnosing "apply succeeded but nothing changed"
 
-A passing apply only proves the style reached the renderer. If the window looks untouched, an ancestor is painting an opaque background. Rather than guessing:
+A passing apply only proves the style reached the renderer. If the window looks untouched, rule out two more fundamental causes first — it takes about thirty seconds:
+
+- **Did this launch even inject anything?** Theming is runtime injection. After an app update, or after the app relaunches itself, the new process is typically started **bare** (no `--remote-debugging-port` on the command line), so no injection ever happens and the UI is back to its native skin — which reads exactly like "the theme broke". Checking the process command line is faster than inspecting the theme: `Get-CimInstance Win32_Process -Filter "Name='WorkBuddy.exe'"` on Windows (`ps -ax -o command` on macOS). No debug port means do not touch the CSS — relaunch once with the port first.
+- **Are the image and the CSS actually fine?** Read the wallpaper custom property, `fetch()` its `blob:` URL to confirm the byte count, and decode it with `new Image()` to confirm the dimensions. If all three pass, the asset and the stylesheet are good and the only remaining explanation is occlusion — go straight on. These three steps save a detour into CSP and object-URL-lifetime theories; every one of those was suspected here and every one was wrong.
+
+If both check out, an ancestor really is painting an opaque background. Rather than guessing:
 
 1. Walk up from `document.elementFromPoint(x, y)`, printing `backgroundColor` for each ancestor — this shows which layer covers the image.
 2. Enumerate every element whose `backgroundColor` alpha exceeds 0.85 and that intersects the viewport, sorted by visible area. **Do not filter by area threshold** — a size filter misses small chrome such as the window-control strip.
@@ -151,7 +161,7 @@ html.codedrobe-host-workbuddy #root {
 
 /* 2. clear the plates from the table above, and nothing else */
 html.codedrobe-host-workbuddy .teams-container,
-html.codedrobe-host-workbuddy [class*="_gridViewItem_"],
+html.codedrobe-host-workbuddy [class*="gridView"],
 html.codedrobe-host-workbuddy .conversation-shell,
 html.codedrobe-host-workbuddy .wb-home-route {
   background-color: transparent !important;
